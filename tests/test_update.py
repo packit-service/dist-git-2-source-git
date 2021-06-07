@@ -9,6 +9,19 @@ import git
 import pytest
 
 from dist2src.constants import START_TAG_TEMPLATE
+import unittest
+
+from requre.helpers.simple_object import Simple
+from requre.helpers.files import StoreFiles
+from requre.online_replacing import (
+    apply_decorator_to_all_methods,
+    replace_module_match,
+)
+from requre.modules_decorate_all_methods import (
+    record_git_module,
+    record_requests_module,
+    record_tempfile_module,
+)
 
 from tests.conftest import (
     MOCK_BUILD,
@@ -19,6 +32,108 @@ from tests.conftest import (
     clone_package_rpms,
     clone_package_src,
 )
+
+
+@record_requests_module
+@record_git_module
+@record_tempfile_module
+@apply_decorator_to_all_methods(
+    replace_module_match(
+        what="packit.utils.run_command_remote", decorate=Simple.decorator_plain()
+    )
+)
+@apply_decorator_to_all_methods(
+    replace_module_match(
+        what="packit.fedpkg.FedPKG.clone",
+        decorate=StoreFiles.where_arg_references(
+            key_position_params_dict={"target_path": 2}
+        ),
+    )
+)
+# Be aware that decorator stores login and token to test_data, replace it by some value.
+# Default precommit hook doesn't do that for copr.v3.helpers, see README.md
+@apply_decorator_to_all_methods(
+    replace_module_match(
+        what="copr.v3.helpers.config_from_file", decorate=Simple.decorator_plain()
+    )
+)
+@apply_decorator_to_all_methods(
+    replace_module_match(
+        what="tests.conftest.clone_package",
+        decorate=StoreFiles.where_arg_references(
+            key_position_params_dict={"dist_git_path": 1},
+            return_decorator=Simple.decorator_plain,
+        ),
+    )
+)
+class Update(unittest.TestCase):
+    def setUp(self) -> None:
+        self.package_name = "haproxy"
+        self.branch = "c8s"
+        self.tmp_path = Path("/tmp") / "test_update"
+        self.dist_git_path = self.tmp_path / "d" / self.package_name
+        self.sg_path = self.tmp_path / "s" / self.package_name
+        self.dist_git_path.mkdir(parents=True)
+        self.sg_path.mkdir(parents=True)
+
+    def test_update(self):
+        """
+        perform an update from a previous dist-git commit (HEAD~1)
+        to the last one (HEAD)
+        """
+        clone_package(
+            self.package_name, dist_git_path=str(self.dist_git_path), branch=self.branch
+        )
+        subprocess.check_call(
+            ["git", "reset", "--hard", "HEAD~1"],
+            cwd=self.dist_git_path,
+        )
+
+        run_dist2src(
+            [
+                "-vvv",
+                "convert",
+                f"{self.dist_git_path}:{self.branch}",
+                f"{self.sg_path}:{self.branch}",
+            ]
+        )
+        # the source-git repo cannot be dirty after the conversion
+        assert_repo_is_not_dirty(self.sg_path)
+
+        subprocess.check_call(
+            ["git", "pull", "origin", self.branch],
+            cwd=self.dist_git_path,
+        )
+
+        run_dist2src(
+            [
+                "-vvv",
+                "convert",
+                f"{self.dist_git_path}:{self.branch}",
+                f"{self.sg_path}:{self.branch}",
+            ]
+        )
+        assert_repo_is_not_dirty(self.sg_path)
+
+        run_packit(
+            [
+                "--debug",
+                "srpm",
+            ],
+            working_dir=self.sg_path,  # _srcrpmdir rpm macro is set to /, let's CWD then
+        )
+        srpm_path = next(self.sg_path.glob("*.src.rpm"))
+        assert srpm_path.exists()
+        if MOCK_BUILD:
+            subprocess.check_call(
+                [
+                    "mock",
+                    "--rebuild",
+                    "-r",
+                    "centos-stream-x86_64",
+                    srpm_path,
+                ]
+            )
 
 
 def assert_repo_is_not_dirty(repo_path: Union[str, Path]):

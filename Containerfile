@@ -33,6 +33,7 @@ RUN ln -s -f /src/pyproject.toml /pyproject.toml
 COPY .git /src/.git
 
 WORKDIR /src
+RUN pip3 install git+https://github.com/packit/requre.git
 RUN pip3 install . && pip3 check
 
 WORKDIR /workdir

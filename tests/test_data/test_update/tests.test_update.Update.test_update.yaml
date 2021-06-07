@@ -1,0 +1,27 @@
+X:
+  file:
+    tar:
+      StoreFiles:
+        tests.test_update.Update.test_update.yaml:
+          dist_git_path:
+            - metadata:
+                latency: 0
+              output: tests.test_update.Update.test_update.yaml.haproxy_1.tar.xz
+_requre:
+  DataTypes: 1
+  key_strategy: StorageKeysInspectSimple
+  version_storage_file: 2
+tests.conftest:
+  clone_package:
+    - metadata:
+        latency: 6.478456497192383
+        module_call_list:
+          - unittest.case
+          - requre.online_replacing
+          - tests.test_update
+          - requre.helpers.files
+          - requre.objects
+          - requre.cassette
+          - tests.conftest
+          - clone_package
+      output: null
